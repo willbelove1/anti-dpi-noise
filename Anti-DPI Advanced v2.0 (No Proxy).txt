@@ -1,0 +1,154 @@
+// ==UserScript==
+// @name         Anti-DPI Advanced v2.0 (with Config, CDN & Service Worker)
+// @namespace    http://tampermonkey.net/
+// @version      2.0
+// @description  Gây nhiễu DPI bằng headers giả, request ngẫu nhiên, Service Worker, cập nhật CDN và UI cấu hình trong Tampermonkey.
+// @author       You
+// @match        *://*/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @run-at       document-end
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    // ========== ⚙️ UI Cấu hình ==========
+    const configDefaults = {
+        requestCount: 10,
+        interval: 30000, // 30 giây
+        cdnUrl: 'https://cdn.jsdelivr.net/gh/user/repo/noise-domains.json',
+        enableSW: true
+    };
+
+    // Đọc cấu hình từ bộ nhớ
+    const config = {
+        requestCount: GM_getValue('requestCount', configDefaults.requestCount),
+        interval: GM_getValue('interval', configDefaults.interval),
+        cdnUrl: GM_getValue('cdnUrl', configDefaults.cdnUrl),
+        enableSW: GM_getValue('enableSW', configDefaults.enableSW)
+    };
+
+    // Menu chỉnh cấu hình
+    GM_registerMenuCommand("⚙️ Cấu hình Anti-DPI", async () => {
+        const req = prompt("Số request gây nhiễu mỗi lần (mặc định 10):", config.requestCount);
+        const delay = prompt("Khoảng cách giữa các đợt (ms) (mặc định 30000):", config.interval);
+        const cdn = prompt("URL CDN chứa danh sách domain gây nhiễu:", config.cdnUrl);
+        const sw = confirm("Bạn có muốn kích hoạt Service Worker redirect?");
+        GM_setValue('requestCount', parseInt(req) || configDefaults.requestCount);
+        GM_setValue('interval', parseInt(delay) || configDefaults.interval);
+        GM_setValue('cdnUrl', cdn || configDefaults.cdnUrl);
+        GM_setValue('enableSW', sw);
+        alert("✅ Đã lưu cấu hình. Reload trang để áp dụng.");
+    });
+
+    // ========== 📦 Cấu trúc dữ liệu ==========
+    const userAgents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64)...',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X)...',
+        'Mozilla/5.0 (X11; Linux x86_64)...',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS)...'
+    ];
+
+    const customHeaders = {
+        'Accept': [...],
+        'Accept-Language': [...],
+        'Referer': [...],
+        'Origin': [...],
+        'Cache-Control': [...],
+        'Connection': [...]
+    };
+
+    const methods = ['GET', 'POST', 'HEAD', 'OPTIONS'];
+    let noiseDomains = [];
+
+    // ========== 🌐 Tải danh sách domain từ CDN ==========
+    function fetchNoiseDomainsFromCDN() {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: config.cdnUrl + '?_=' + Date.now(),
+            onload: res => {
+                try {
+                    const data = JSON.parse(res.responseText);
+                    noiseDomains = data.domains || [];
+                    console.log('[Anti-DPI] Noise domains loaded:', noiseDomains);
+                } catch (e) {
+                    console.warn('❌ Lỗi phân tích JSON noiseDomains:', e);
+                }
+            },
+            onerror: err => console.warn('❌ Không thể tải CDN:', err)
+        });
+    }
+
+    // ========== 🧠 Utilities ==========
+    function getRandomItem(arr) {
+        return arr[Math.floor(Math.random() * arr.length)];
+    }
+
+    function generateHeaders() {
+        return {
+            'User-Agent': getRandomItem(userAgents),
+            'Accept': getRandomItem(customHeaders.Accept),
+            'Accept-Language': getRandomItem(customHeaders['Accept-Language']),
+            'Referer': getRandomItem(customHeaders.Referer),
+            'Origin': getRandomItem(customHeaders.Origin),
+            'Cache-Control': getRandomItem(customHeaders['Cache-Control']),
+            'Connection': getRandomItem(customHeaders.Connection),
+            'X-Custom-Header': 'Noise-' + Math.random().toString(36).substring(2)
+        };
+    }
+
+    function sendFakeRequest(method, url) {
+        GM_xmlhttpRequest({
+            method,
+            url: config.enableSW ? redirectViaSW(url) : url,
+            headers: generateHeaders(),
+            data: method === 'POST' ? JSON.stringify({ junk: Math.random() }) : null,
+            onload: res => console.log(`[${method}] ${url} =>`, res.status),
+            onerror: err => console.error(`[${method}] Error:`, err)
+        });
+    }
+
+    function redirectViaSW(url) {
+        // Đánh dấu URL để SW nhận biết và xử lý
+        return url + (url.includes('?') ? '&' : '?') + 'antiDPI=' + Math.random().toString(36).substring(7);
+    }
+
+    // ========== 🖼️ Gây nhiễu DOM ==========
+    function insertHiddenIframes() {
+        if (!noiseDomains.length) return;
+        noiseDomains.forEach(domain => {
+            const iframe = document.createElement('iframe');
+            iframe.src = redirectViaSW(domain);
+            iframe.style = 'display:none;width:0;height:0;';
+            document.body.appendChild(iframe);
+
+            const img = document.createElement('img');
+            img.src = redirectViaSW(domain + '?img=' + Math.random());
+            img.style = 'width:1px;height:1px;position:absolute;left:-9999px;';
+            document.body.appendChild(img);
+        });
+    }
+
+    function scheduleNoise() {
+        for (let i = 0; i < config.requestCount; i++) {
+            const method = getRandomItem(methods);
+            const url = getRandomItem(noiseDomains);
+            if (url) sendFakeRequest(method, url);
+        }
+    }
+
+    // ========== 🚀 Main ==========
+    window.addEventListener('load', () => {
+        if (location.protocol !== 'https:') return console.warn('⚠️ HTTPS không được sử dụng.');
+        fetchNoiseDomainsFromCDN();
+        setTimeout(() => {
+            insertHiddenIframes();
+            scheduleNoise();
+            setInterval(scheduleNoise, config.interval);
+        }, 3000);
+    });
+
+})();

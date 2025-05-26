@@ -1,0 +1,101 @@
+// ==UserScript==
+// @name         Advanced Anti-DPI Headers
+// @namespace    http://tampermonkey.net/
+// @version      0.2
+// @description  Enhanced script to obscure HTTP requests and make DPI harder
+// @author       You
+// @match        *://*/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Danh sách User-Agent ngẫu nhiên
+    const userAgents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1'
+    ];
+
+    // Danh sách proxy công khai (cần thay bằng proxy đáng tin cậy)
+    const proxies = [
+        'http://proxy1.example.com:8080',
+        'http://proxy2.example.com:8080'
+    ];
+
+    // Danh sách header tùy chỉnh
+    const customHeaders = {
+        'Accept': [
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'application/json, text/plain, */*'
+        ],
+        'Accept-Language': [
+            'en-US,en;q=0.5',
+            'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
+        ],
+        'Referer': [
+            'https://www.google.com',
+            'https://www.bing.com',
+            ''
+        ]
+    };
+
+    // Hàm chọn giá trị ngẫu nhiên từ mảng
+    function getRandomItem(array) {
+        return array[Math.floor(Math.random() * array.length)];
+    }
+
+    // Hàm tạo độ trễ ngẫu nhiên (1-500ms)
+    function randomDelay() {
+        return Math.floor(Math.random() * 500) + 1;
+    }
+
+    // Hàm lưu trữ và lấy danh sách proxy từ GM storage
+    function getProxy() {
+        const savedProxy = GM_getValue('selectedProxy', '');
+        if (savedProxy && proxies.includes(savedProxy)) {
+            return savedProxy;
+        }
+        const newProxy = getRandomItem(proxies);
+        GM_setValue('selectedProxy', newProxy);
+        return newProxy;
+    }
+
+    // Hàm gửi yêu cầu với header tùy chỉnh
+    function sendModifiedRequest(url) {
+        const headers = {
+            'User-Agent': getRandomItem(userAgents),
+            'Accept': getRandomItem(customHeaders['Accept']),
+            'Accept-Language': getRandomItem(customHeaders['Accept-Language']),
+            'Referer': getRandomItem(customHeaders['Referer']),
+            'X-Custom-Header': 'RandomValue' + Math.random().toString(36).substring(2)
+        };
+
+        setTimeout(() => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                headers: headers,
+                proxy: getProxy(), // Sử dụng proxy nếu có
+                onload: function(response) {
+                    console.log('Request sent with modified headers:', response.status, response.finalUrl);
+                },
+                onerror: function(error) {
+                    console.error('Request failed:', error);
+                }
+            });
+        }, randomDelay());
+    }
+
+    // Kiểm tra nếu trang sử dụng HTTPS
+    if (window.location.protocol === 'https:') {
+        console.log('HTTPS detected, applying anti-DPI measures.');
+        sendModifiedRequest(window.location.href);
+    } else {
+        console.warn('Non-HTTPS connection, DPI may still analyze traffic.');
+    }
+})();
